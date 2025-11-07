@@ -21,6 +21,8 @@ import numpy as np
 import argparse
 import yaml
 from PIL import Image
+from PIL import Image as PILImage
+
 import matplotlib.pyplot as plt
 
 # 경로 추가
@@ -145,8 +147,13 @@ def test_navigation(args):
     goal_image = load_image_context([goal_path], 1, image_size)
 
     # 배치 차원 추가
-    obs_images = obs_images.unsqueeze(0).to(device)  # [1, context_size*3, H, W]
-    goal_image = goal_image.unsqueeze(0).to(device)  # [1, 3, H, W]
+    # obs_images = obs_images.unsqueeze(0).to(device)  # [1, context_size*3, H, W]
+    # goal_image = goal_image.unsqueeze(0).to(device)  # [1, 3, H, W]
+    # obs_images = obs_images.squeeze(1).unsqueeze(0).to(device)  # [1, 15, 64, 85]
+    # goal_image = goal_image.squeeze(1).unsqueeze(0).to(device)  # [1, 3, 64, 85]
+    obs_images = obs_images.view(1, 3 * context_size, image_size[0], image_size[1]).to(device)
+    goal_image = goal_image.view(1, 3, image_size[0], image_size[1]).to(device)
+
 
     print(f"  - 관찰 이미지 텐서: {obs_images.shape}")
     print(f"  - 목표 이미지 텐서: {goal_image.shape}")
@@ -157,7 +164,8 @@ def test_navigation(args):
         # 거리 예측 (goal masking 모델의 경우)
         if model_params.get('goals_per_obs', 1) > 0:
             # 목표까지의 거리 예측
-            obs_cond_params = model('vision_encoder', obs_img=obs_images, goal_img=goal_image)
+            # obs_cond_params = model('vision_encoder', obs_img=obs_images, goal_img=goal_image)
+            obs_cond_params = model(obs_img=obs_images, goal_img=goal_image)
 
             # Waypoint 예측
             if 'nomad' in args.model:
@@ -170,7 +178,7 @@ def test_navigation(args):
                 waypoints = model('dist_pred_net', obsgoal_cond=obs_cond_params)
             else:
                 # ViNT/GNM: 직접 waypoint 예측
-                waypoints = model('dist_pred_net', obsgoal_cond=obs_cond_params)
+                _, waypoints = model(obs_img=obs_images, goal_img=goal_image)
         else:
             # 기본 forward pass
             waypoints = model(obs_images, goal_image)

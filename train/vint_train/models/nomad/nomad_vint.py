@@ -96,8 +96,10 @@ class NoMaD_ViNT(nn.Module):
         goal_encoding = obsgoal_encoding
         
         # Get the observation encoding
-        obs_img = torch.split(obs_img, 3, dim=1)
-        obs_img = torch.concat(obs_img, dim=0)
+        # obs_img = torch.split(obs_img, 3, dim=1)
+        # obs_img = torch.concat(obs_img, dim=0)
+        B = obs_img.shape[0]
+        obs_img = obs_img.view(B * self.context_size, 3, obs_img.shape[2], obs_img.shape[3])
 
         obs_encoding = self.obs_encoder.extract_features(obs_img)
         obs_encoding = self.obs_encoder._avg_pooling(obs_encoding)

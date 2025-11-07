@@ -81,7 +81,9 @@ class ViNT(BaseModel):
         if self.late_fusion:
             goal_encoding = self.goal_encoder.extract_features(goal_img)
         else:
-            obsgoal_img = torch.cat([obs_img[:, 3*self.context_size:, :, :], goal_img], dim=1)
+            # obsgoal_img = torch.cat([obs_img[:, 3*self.context_size:, :, :], goal_img], dim=1)
+            obsgoal_img = torch.cat([obs_img[:, -3:, :, :], goal_img], dim=1)
+
             goal_encoding = self.goal_encoder.extract_features(obsgoal_img)
         goal_encoding = self.goal_encoder._avg_pooling(goal_encoding)
         if self.goal_encoder._global_params.include_top:
@@ -114,12 +116,34 @@ class ViNT(BaseModel):
         obs_encoding = self.compress_obs_enc(obs_encoding)
         # currently, the size is [batch_size*(self.context_size + 1), self.obs_encoding_size]
         # reshape the obs_encoding to [context + 1, batch, encoding_size], note that the order is flipped
-        obs_encoding = obs_encoding.reshape((self.context_size+1, -1, self.obs_encoding_size))
-        obs_encoding = torch.transpose(obs_encoding, 0, 1)
-        # currently, the size is [batch_size, self.context_size+1, self.obs_encoding_size]
+        print("obs_encoding shape before reshape:", obs_encoding.shape)
+        print("context_size:", self.context_size, "obs_encoding_size:", self.obs_encoding_size)
 
-        # concatenate the goal encoding to the observation encoding
-        tokens = torch.cat((obs_encoding, goal_encoding), dim=1)
+        # ✅ reshape before adding goal: only context_size → goal later
+        # obs_encoding = obs_encoding.view(-1, self.context_size, self.obs_encoding_size)
+        # obs_encoding = torch.transpose(obs_encoding, 0, 1)
+        # [batch, context_size, 512]
+
+        obs_encoding = obs_encoding.reshape((-1, self.context_size, self.obs_encoding_size))
+
+
+        # ✅ add last observation + goal encoding as extra tokens
+        last_obs_img = obs_img[-1:].clone()  # [1, 3, H, W]
+        obsgoal_img = torch.cat([last_obs_img, goal_img], dim=1)
+        # obsgoal_img = torch.cat([obs_img[:, -3:, :, :], goal_img], dim=1)
+        goal_encoding_extra = self.goal_encoder.extract_features(obsgoal_img)
+        goal_encoding_extra = self.goal_encoder._avg_pooling(goal_encoding_extra)
+        goal_encoding_extra = goal_encoding_extra.flatten(start_dim=1)
+        goal_encoding_extra = self.compress_goal_enc(goal_encoding_extra).unsqueeze(1)
+
+        # [batch, 1, 512]
+        tokens = torch.cat((obs_encoding, goal_encoding_extra), dim=1)
+        # [batch, context_size + 1, 512]
+
+        if tokens.shape[1] == self.context_size + 1:
+            pad = torch.zeros(tokens.size(0), 1, tokens.size(2), device=tokens.device)
+            tokens = torch.cat([tokens, pad], dim=1)
+
         final_repr = self.decoder(tokens)
         # currently, the size is [batch_size, 32]
 

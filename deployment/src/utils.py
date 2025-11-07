@@ -4,8 +4,10 @@ import sys
 import io
 import matplotlib.pyplot as plt
 
+from PIL import Image
+
 # ROS
-from sensor_msgs.msg import Image
+# from sensor_msgs.msg import Image
 
 # pytorch
 import torch
@@ -111,7 +113,7 @@ def load_model(
     return model
 
 
-def msg_to_pil(msg: Image) -> PILImage.Image:
+def msg_to_pil(msg: Image.Image) -> Image.Image:
     img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
         msg.height, msg.width, -1)
     pil_image = PILImage.fromarray(img)
