@@ -161,4 +161,8 @@ class ViNT(BaseModel):
             action_pred[:, :, 2:] = F.normalize(
                 action_pred[:, :, 2:].clone(), dim=-1
             )  # normalize the angle prediction
+
+        if hasattr(self, "max_v") and hasattr(self, "rate"):
+            scale_factor = self.max_v / self.rate
+            action_pred[:, :, :2] *= scale_factor
         return dist_pred, action_pred

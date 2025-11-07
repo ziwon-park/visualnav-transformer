@@ -32,6 +32,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'train'))
 from deployment.src.utils import load_model, transform_images
 from vint_train.training.train_utils import get_action
 
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
 
 def load_vint_model(model_name='vint'):
     """ViNT 모델 로드"""
@@ -98,8 +102,13 @@ def test_navigation(args):
     print(f"  - Image size: {image_size}")
 
     # 이미지 로드
-    if args.topomap_dir:
-        # Topological map 사용
+    if args.current_image and args.goal_image:  # 단일 이미지 쌍 모드
+        obs_paths = [args.current_image] * context_size
+        goal_path = args.goal_image
+        print(f"\n✅ 사용자 지정 현재 이미지 사용: {args.current_image}")       
+        print(f"✅ 사용자 지정 목표 이미지 사용: {args.goal_image}")
+
+    elif args.topomap_dir:  # Topological map 사용  
         topomap_dir = f"deployment/topomaps/images/{args.topomap_dir}"
         if not os.path.exists(topomap_dir):
             raise FileNotFoundError(f"Topomap 디렉토리를 찾을 수 없습니다: {topomap_dir}")
@@ -121,12 +130,23 @@ def test_navigation(args):
             # 기본값: 처음 context_size개 이미지
             obs_paths = topomap_paths[:context_size]
 
-        # 목표 이미지
-        goal_idx = args.goal_idx if args.goal_idx != -1 else len(topomap_paths) - 1
-        goal_path = topomap_paths[goal_idx]
+        if args.goal_image:
+            goal_path = args.goal_image
+            print(f"✅ 사용자 지정 목표 이미지 사용: {goal_path}")
+        elif args.goal_idx != -1:
+            goal_path = topomap_paths[args.goal_idx]
+        else:
+            goal_path = topomap_paths[-1]
 
         print(f"\n현재 위치 이미지: {[os.path.basename(p) for p in obs_paths]}")
-        print(f"목표 이미지: {os.path.basename(goal_path)} (인덱스: {goal_idx})")
+        # print(f"목표 이미지: {os.path.basename(goal_path)} (인덱스: {goal_idx})")
+        if args.goal_image:
+            print(f"목표 이미지: {os.path.basename(goal_path)} (사용자 지정)")
+        elif args.goal_idx != -1:
+            print(f"목표 이미지: {os.path.basename(goal_path)} (인덱스: {args.goal_idx})")
+        else:
+            print(f"목표 이미지: {os.path.basename(goal_path)} (마지막 노드)")
+
 
     else:
         # 단일 이미지 쌍 테스트
@@ -199,6 +219,51 @@ def test_navigation(args):
 
     return waypoints_np
 
+def visualize_waypoints_on_image(image_path, waypoints, save_path=None, scale=50):
+    """현재 이미지 위에 ViNT 예측 경로를 오버레이"""
+    import cv2
+    import matplotlib.pyplot as plt
+    import os
+
+    img = cv2.imread(image_path)
+    if img is None:
+        raise FileNotFoundError(f"이미지를 찾을 수 없습니다: {image_path}")
+    h, w, _ = img.shape
+
+    origin = (w // 2, h - 60)  # 로봇 현재 위치
+    pts = []
+    for wp in waypoints:
+        x, y = wp[:2]
+        px = int(origin[0] + y * scale)
+        py = int(origin[1] - x * scale)
+        pts.append((px, py))
+    pts = np.array(pts, np.int32)
+
+    # 점 + 경로
+    for i, (px, py) in enumerate(pts):
+        cv2.circle(img, (px, py), 6, (0, 0, 255), -1)
+        cv2.putText(img, str(i), (px+5, py-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        if i > 0:
+            cv2.line(img, tuple(pts[i-1]), (px, py), (255, 0, 0), 3)
+
+    # 시작점 표시
+    cv2.circle(img, origin, 8, (0,255,0), -1)
+    cv2.putText(img, "Start", (origin[0]+10, origin[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+
+    plt.figure(figsize=(8,6))
+    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    plt.title("ViNT Predicted Path (Overlay)")
+    plt.axis("off")
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"✅ Overlay 결과 저장 완료: {save_path}")
+        plt.close()
+    else:
+        plt.show()
+
 
 def visualize_results(obs_paths, goal_path, waypoints, args):
     """결과 시각화"""
@@ -240,11 +305,13 @@ def visualize_results(obs_paths, goal_path, waypoints, args):
 
     # 저장
     if args.output:
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)  # ← 폴더 자동 생성
         plt.savefig(args.output, dpi=150, bbox_inches='tight')
         print(f"결과 저장: {args.output}")
 
-    plt.show()
 
+    overlay_path = os.path.splitext(args.output)[0] + "_overlay.png"
+    visualize_waypoints_on_image(obs_paths[-1], waypoints, save_path=overlay_path)
 
 def main():
     parser = argparse.ArgumentParser(
