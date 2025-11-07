@@ -185,6 +185,16 @@ def test_navigation(args):
         if model_params.get('goals_per_obs', 1) > 0:
             # 목표까지의 거리 예측
             # obs_cond_params = model('vision_encoder', obs_img=obs_images, goal_img=goal_image)
+
+            print("===== DEBUG INFO =====")
+            print("obs_images mean/std:", obs_images.mean().item(), obs_images.std().item())
+            print("goal_image mean/std:", goal_image.mean().item(), goal_image.std().item())
+            print("obs_images unique pixels:", torch.unique(obs_images).shape)
+            print("goal_image unique pixels:", torch.unique(goal_image).shape)
+            print("Model device:", next(model.parameters()).device)
+            print("Model eval:", not model.training)
+            print("=======================")
+
             obs_cond_params = model(obs_img=obs_images, goal_img=goal_image)
 
             # Waypoint 예측
@@ -198,7 +208,15 @@ def test_navigation(args):
                 waypoints = model('dist_pred_net', obsgoal_cond=obs_cond_params)
             else:
                 # ViNT/GNM: 직접 waypoint 예측
-                _, waypoints = model(obs_img=obs_images, goal_img=goal_image)
+                print("====")
+                for name, param in model.obs_encoder.named_parameters():
+                    print(name, param.requires_grad)
+                    break
+                dist_pred, waypoints = model(obs_img=obs_images, goal_img=goal_image)
+                print("dist_pred:", dist_pred)
+                print("waypoints shape:", waypoints.shape)
+                print("waypoints mean/std:", waypoints.mean().item(), waypoints.std().item())
+                print("waypoints sample:", waypoints[0, :, :2])
         else:
             # 기본 forward pass
             waypoints = model(obs_images, goal_image)

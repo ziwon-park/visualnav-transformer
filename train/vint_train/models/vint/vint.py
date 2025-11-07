@@ -6,6 +6,23 @@ from efficientnet_pytorch import EfficientNet
 from vint_train.models.base_model import BaseModel
 from vint_train.models.vint.self_attention import MultiLayerDecoder
 
+def load_pretrained_efficientnet_6ch(model_name="efficientnet-b0"):
+    model = EfficientNet.from_pretrained(model_name)
+    old_conv = model._conv_stem
+    w = old_conv.weight.clone()
+
+    # 3채널 weight 복제해서 6채널로 확장
+    new_conv = nn.Conv2d(6, old_conv.out_channels,
+                         kernel_size=old_conv.kernel_size,
+                         stride=old_conv.stride,
+                         padding=old_conv.padding,
+                         bias=False)
+    new_conv.weight.data[:, :3] = w
+    new_conv.weight.data[:, 3:] = w
+    model._conv_stem = new_conv
+    print(f"[DEBUG] goal_encoder 6ch stem var after merge: {new_conv.weight.var().item():.5f}")
+    return model
+
 class ViNT(BaseModel):
     def __init__(
         self,
@@ -32,20 +49,36 @@ class ViNT(BaseModel):
             goal_encoding_size (int): size of the encoding of the goal images
         """
         super(ViNT, self).__init__(context_size, len_traj_pred, learn_angle)
+
+
         self.obs_encoding_size = obs_encoding_size
         self.goal_encoding_size = obs_encoding_size
 
         self.late_fusion = late_fusion
+
         if obs_encoder.split("-")[0] == "efficientnet":
-            self.obs_encoder = EfficientNet.from_name(obs_encoder, in_channels=3) # context
+            print(f"[DEBUG] Loading EfficientNet pretrained encoder: {obs_encoder}")
+            # ✅ use pretrained ImageNet weights
+            self.obs_encoder = EfficientNet.from_pretrained(obs_encoder, in_channels=3)  # context encoder
+            print(f"[DEBUG] obs_encoder stem var after load: {self.obs_encoder._conv_stem.weight.var().item()}")
+
             self.num_obs_features = self.obs_encoder._fc.in_features
+
             if self.late_fusion:
-                self.goal_encoder = EfficientNet.from_name("efficientnet-b0", in_channels=3)
+                # goal encoder도 pretrained
+                print("[DEBUG] Loading goal_encoder (3-channel)")
+                self.goal_encoder = EfficientNet.from_pretrained("efficientnet-b0", in_channels=3)
             else:
-                self.goal_encoder = EfficientNet.from_name("efficientnet-b0", in_channels=6) # obs+goal
+                print("[DEBUG] Loading goal_encoder (6-channel)")
+                # obs + goal concatenation input (6채널)
+                # pretrained weight는 자동으로 3채널 → 6채널에 맞게 첫 conv 확장됨
+                self.goal_encoder = load_pretrained_efficientnet_6ch("efficientnet-b0")
+            print(f"[DEBUG] goal_encoder stem var after load: {self.goal_encoder._conv_stem.weight.var().item()}")
+
             self.num_goal_features = self.goal_encoder._fc.in_features
         else:
             raise NotImplementedError
+
         
         if self.num_obs_features != self.obs_encoding_size:
             self.compress_obs_enc = nn.Linear(self.num_obs_features, self.obs_encoding_size)
@@ -105,6 +138,8 @@ class ViNT(BaseModel):
 
         # get the observation encoding
         obs_encoding = self.obs_encoder.extract_features(obs_img)
+        print("obs_encoding var:", obs_encoding.var().item())
+
         # currently the size is [batch_size*(self.context_size + 1), 1280, H/32, W/32]
         obs_encoding = self.obs_encoder._avg_pooling(obs_encoding)
         # currently the size is [batch_size*(self.context_size + 1), 1280, 1, 1]
